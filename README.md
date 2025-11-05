@@ -22,7 +22,7 @@ Installation
 ------------
 ```sh
 # compile once and keep the binary on your PATH
-go build -o go-commitgen main.go
+go build -o go-commitgen ./cmd/go-commitgen
 mv go-commitgen ~/go/bin/            # or any directory in PATH
 
 # optional helper alias
