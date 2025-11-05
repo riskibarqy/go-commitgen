@@ -88,12 +88,18 @@ func FallbackParts(raw string) Parts {
 func BuildMessage(branch string, parts Parts) Message {
 	ticket := extractTicket(branch)
 	commitType := normaliseCommitType(parts.CommitType)
-	description := sanitizeDescription(parts.Description)
-	if description == "" {
-		description = "update project files"
-	}
 
 	summary := sanitizeSummary(parts.Summary)
+
+	description := sanitizeDescription(parts.Description)
+	if description == "" {
+		if summary != "" {
+			description = summary
+		} else {
+			description = "update project files"
+		}
+	}
+
 	if summary == "" {
 		summary = util.TruncateShorten(description, 100)
 	}
