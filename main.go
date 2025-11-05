@@ -259,6 +259,8 @@ var allowedCommitTypes = map[string]string{
 	"ci":       "ci",
 }
 
+var ticketPattern = regexp.MustCompile(`^([A-Za-z]+-\d+)`)
+
 func parseCommitParts(raw string) (commitParts, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -407,6 +409,11 @@ func extractTicket(branch string) string {
 
 	if idx := strings.LastIndex(branch, "/"); idx != -1 && idx < len(branch)-1 {
 		branch = branch[idx+1:]
+	}
+
+	// Strip common environment suffixes like "-dev"
+	if m := ticketPattern.FindStringSubmatch(branch); len(m) == 2 {
+		return m[1]
 	}
 
 	return branch
