@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	defaultEndpoint    = "http://localhost:11434"
-	defaultModel       = "qwen2.5-coder:1.5b"
-	defaultReviewModel = "qwen2.5-coder:1.5b"
+	defaultEndpoint    = "http://localhost:20128/v1"
+	defaultModel       = "9router-codex"
+	defaultReviewModel = "9router-codex"
 	defaultMaxBytes    = 32000
 	defaultTimeout     = 40 * time.Second
 )
@@ -21,6 +21,7 @@ type Options struct {
 	Model        string
 	ReviewModel  string
 	Endpoint     string
+	APIKey       string
 	MaxBytes     int
 	Commit       bool
 	Review       bool
@@ -36,9 +37,10 @@ func Parse() (Options, error) {
 	fs := flag.NewFlagSet("go-commitgen", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 
-	model := fs.String("model", envOr("OLLAMA_MODEL", defaultModel), "Ollama model used for commit generation")
-	reviewModel := fs.String("review-model", envOr("OLLAMA_REVIEW_MODEL", defaultReviewModel), "Ollama model used for code review (falls back to --model)")
-	endpoint := fs.String("endpoint", envOr("OLLAMA_ENDPOINT", defaultEndpoint), "Ollama base URL")
+	model := fs.String("model", envFirst(defaultModel, "COMMITGEN_MODEL", "OPENAI_MODEL", "OLLAMA_MODEL"), "Model used for commit generation")
+	reviewModel := fs.String("review-model", envFirst(defaultReviewModel, "COMMITGEN_REVIEW_MODEL", "OLLAMA_REVIEW_MODEL"), "Model used for code review (falls back to --model)")
+	endpoint := fs.String("endpoint", envFirst(defaultEndpoint, "COMMITGEN_ENDPOINT", "OPENAI_BASE_URL", "OLLAMA_ENDPOINT"), "OpenAI-compatible base URL, usually ending with /v1")
+	apiKey := fs.String("api-key", envFirst("", "COMMITGEN_API_KEY", "OPENAI_API_KEY"), "Bearer API key for the OpenAI-compatible endpoint")
 	maxBytes := fs.Int("max-bytes", intFromEnv("COMMITGEN_MAX_BYTES", defaultMaxBytes), "Maximum diff bytes to send to the model")
 	commitNow := fs.Bool("commit", true, "Run `git commit -m` with the generated message")
 	runReview := fs.Bool("review", false, "Run an AI review before generating the commit message")
@@ -53,6 +55,7 @@ func Parse() (Options, error) {
 		Model:        stringsFallback(*model, defaultModel),
 		ReviewModel:  stringsFallback(*reviewModel, *model),
 		Endpoint:     stringsFallback(*endpoint, defaultEndpoint),
+		APIKey:       strings.TrimSpace(*apiKey),
 		MaxBytes:     *maxBytes,
 		Commit:       *commitNow,
 		Review:       *runReview,
@@ -66,9 +69,11 @@ func Parse() (Options, error) {
 	return opts, nil
 }
 
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func envFirst(fallback string, keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
 	}
 	return fallback
 }
