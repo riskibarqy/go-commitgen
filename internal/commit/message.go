@@ -39,7 +39,7 @@ var (
 		"chore":    "chore",
 		"ci":       "ci",
 	}
-	ticketPattern  = regexp.MustCompile(`^([A-Za-z]+-\d+)`)
+	ticketPattern  = regexp.MustCompile(`([A-Za-z]+-\d+)`)
 	commitKeywords = []string{"fix", "feat", "perf", "refactor", "docs", "test", "build", "ci"}
 )
 
@@ -87,19 +87,27 @@ func FallbackParts(raw string) Parts {
 // BuildMessage creates the final printable/committable representation.
 func BuildMessage(branch string, parts Parts) Message {
 	ticket := extractTicket(branch)
-	commitType := normaliseCommitType(parts.CommitType)
-	description := sanitizeDescription(parts.Description)
-	if description == "" {
-		description = "update project files"
-	}
 
 	summary := sanitizeSummary(parts.Summary)
+
+	description := sanitizeDescription(parts.Description)
+	if description == "" {
+		if summary != "" {
+			description = summary
+		} else {
+			description = "update project files"
+		}
+	}
+
 	if summary == "" {
 		summary = util.TruncateShorten(description, 100)
 	}
 
 	body := sanitizeBody(parts.Body, summary)
-	headline := strings.TrimSpace(strings.Join([]string{ticket, "[" + commitType + "]", description}, " "))
+	headline := description
+	if ticket != "" && ticket != "unknown" {
+		headline = strings.TrimSpace(ticket + " " + description)
+	}
 
 	return Message{
 		Headline: headline,
@@ -200,5 +208,5 @@ func extractTicket(branch string) string {
 		return m[1]
 	}
 
-	return branch
+	return ""
 }

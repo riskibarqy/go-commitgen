@@ -7,14 +7,14 @@ import (
 
 	"github.com/riskibarqy/go-commitgen/internal/commit"
 	"github.com/riskibarqy/go-commitgen/internal/git"
-	"github.com/riskibarqy/go-commitgen/internal/ollama"
+	"github.com/riskibarqy/go-commitgen/internal/llm"
 	"github.com/riskibarqy/go-commitgen/internal/prompt"
 	"github.com/riskibarqy/go-commitgen/internal/util"
 )
 
-// LLMClient represents the behaviour needed from an Ollama client.
+// LLMClient represents transport needed from an LLM backend.
 type LLMClient interface {
-	Generate(ctx context.Context, endpoint string, req ollama.Request) (string, error)
+	Generate(ctx context.Context, endpoint, apiKey string, req llm.Request) (string, error)
 }
 
 // Service orchestrates the review and commit message generation flow.
@@ -37,6 +37,7 @@ type Options struct {
 	Model       string
 	ReviewModel string
 	Endpoint    string
+	APIKey      string
 	MaxBytes    int
 	Review      bool
 }
@@ -52,21 +53,7 @@ func (s *Service) Execute(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, errors.New("service not properly initialized")
 	}
 
-	if opts.ReviewModel == "" {
-		opts.ReviewModel = opts.Model
-	}
-
-	diff, err := s.Repo.StagedDiff(ctx)
-	if err != nil {
-		return Result{}, err
-	}
-	if strings.TrimSpace(diff) == "" {
-		return Result{}, errors.New("no staged changes detected")
-	}
-
-	diff = util.TrimTo(diff, opts.MaxBytes)
-
-	branch, err := s.Repo.CurrentBranch(ctx)
+	diff, branch, err := s.prepare(ctx, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -77,24 +64,20 @@ func (s *Service) Execute(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	if opts.Review {
-		review, err := s.LLM.Generate(ctx, opts.Endpoint, ollama.Request{
-			Model:   opts.ReviewModel,
-			Prompt:  prompt.Review(diff),
-			Stream:  true,
-			Options: map[string]interface{}{"temperature": 0.1, "top_p": 0.9, "num_predict": 200},
-		})
+		review, err := s.performReview(ctx, diff, opts)
 		if err != nil {
 			result.ReviewErr = err
 		} else {
-			result.Review = strings.TrimSpace(review)
+			result.Review = review
 		}
 	}
 
-	raw, err := s.LLM.Generate(ctx, opts.Endpoint, ollama.Request{
-		Model:   opts.Model,
-		Prompt:  prompt.Commit(diff, branch),
-		Stream:  true,
-		Options: map[string]interface{}{"temperature": 0.2, "top_p": 0.9, "num_predict": 120},
+	raw, err := s.LLM.Generate(ctx, opts.Endpoint, opts.APIKey, llm.Request{
+		Model:       opts.Model,
+		Prompt:      prompt.Commit(diff, branch),
+		Temperature: 0.2,
+		TopP:        0.9,
+		MaxTokens:   120,
 	})
 	if err != nil {
 		return Result{}, err
@@ -107,4 +90,57 @@ func (s *Service) Execute(ctx context.Context, opts Options) (Result, error) {
 
 	result.Message = commit.BuildMessage(branch, parts)
 	return result, nil
+}
+
+// ReviewOnly evaluates only the review prompt and returns the findings.
+func (s *Service) ReviewOnly(ctx context.Context, opts Options) (string, error) {
+	if s == nil || s.Repo == nil || s.LLM == nil {
+		return "", errors.New("service not properly initialized")
+	}
+
+	diff, _, err := s.prepare(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+
+	return s.performReview(ctx, diff, opts)
+}
+
+func (s *Service) prepare(ctx context.Context, opts Options) (string, string, error) {
+	diff, err := s.Repo.StagedDiff(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(diff) == "" {
+		return "", "", errors.New("no staged changes detected")
+	}
+
+	diff = util.TrimTo(diff, opts.MaxBytes)
+
+	branch, err := s.Repo.CurrentBranch(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	return diff, branch, nil
+}
+
+func (s *Service) performReview(ctx context.Context, diff string, opts Options) (string, error) {
+	model := opts.ReviewModel
+	if strings.TrimSpace(model) == "" {
+		model = opts.Model
+	}
+
+	review, err := s.LLM.Generate(ctx, opts.Endpoint, opts.APIKey, llm.Request{
+		Model:       model,
+		Prompt:      prompt.Review(diff),
+		Temperature: 0.1,
+		TopP:        0.9,
+		MaxTokens:   200,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(review), nil
 }
